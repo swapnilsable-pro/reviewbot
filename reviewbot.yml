@@ -1,0 +1,19 @@
+# ReviewBot's own review config (dogfooding).
+model: google/gemma-4-31b-it:free
+
+review:
+  categories:
+    - bugs
+    - security
+    - error_handling
+    - code_quality
+
+  block_merge_on: [bug, security]
+
+  ignore:
+    - "*.md"
+    - "tests/**"
+    - "examples/**"
+
+  max_files_per_pr: 20
+  max_lines_per_file: 400

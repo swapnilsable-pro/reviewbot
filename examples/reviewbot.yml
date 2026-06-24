@@ -1,0 +1,22 @@
+# reviewbot.yml — place at your repo root (optional; these are the defaults)
+
+model: google/gemma-4-31b-it:free    # any OpenRouter model id
+
+review:
+  categories:
+    - bugs            # NullPointerException, wrong conditions, logic errors
+    - security        # SQL injection, hardcoded secrets, missing validation
+    - error_handling  # bare except, swallowed errors
+    - code_quality    # dead code, duplication
+    # - performance   # uncomment to enable
+    # - style         # uncomment to enable
+
+  block_merge_on: [bug, security]    # severities/categories that trigger REQUEST_CHANGES + CI failure
+
+  ignore:
+    - "*.md"
+    - "tests/**"
+    - "migrations/**"
+
+  max_files_per_pr: 20       # skip review of extra files on huge PRs
+  max_lines_per_file: 400    # truncate very large diffs

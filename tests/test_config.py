@@ -1,11 +1,13 @@
 """Tests for reviewbot.config — defaults, YAML loading, validation, ignore globs."""
 
 import pytest
+from pydantic import ValidationError
 
 from reviewbot.config import (
     DEFAULT_MODEL,
     ConfigError,
     ReviewBotConfig,
+    ReviewSettings,
     load_config,
 )
 
@@ -24,6 +26,18 @@ class TestDefaults:
         path.write_text("")
         config = load_config(path)
         assert config.model == DEFAULT_MODEL
+
+    def test_review_settings_new_defaults(self):
+        s = ReviewSettings()
+        assert s.min_confidence == 0.7
+        assert s.require_evidence is True
+        assert s.verify is True
+
+    def test_min_confidence_bounds(self):
+        with pytest.raises(ValidationError):
+            ReviewSettings(min_confidence=1.5)
+        with pytest.raises(ValidationError):
+            ReviewSettings(min_confidence=-0.1)
 
 
 class TestLoading:

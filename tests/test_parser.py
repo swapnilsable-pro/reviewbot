@@ -101,6 +101,24 @@ class TestGitHubStylePatch:
             build_file_hunk("x.py", "this is not a diff at all\njust text\n")
 
 
+class TestEnclosingContext:
+    def test_repo_root_populates_enclosing_scope(self, tmp_path):
+        (tmp_path / "app").mkdir()
+        (tmp_path / "app" / "auth.py").write_text(
+            "import os\n\ndef login(user):\n    return user.email\n"
+        )
+        patch = "@@ -3,1 +3,2 @@\n def login(user):\n+    log(user)\n     return user.email\n"
+        hunk = build_file_hunk("app/auth.py", patch, repo_root=str(tmp_path))
+        assert "def login(user):" in hunk.enclosing_context
+        assert "import os" in hunk.imports
+
+    def test_missing_file_falls_back_to_empty_context(self):
+        patch = "@@ -1,1 +1,2 @@\n a = 1\n+b = 2\n"
+        hunk = build_file_hunk("ghost.py", patch, repo_root="/nonexistent")
+        assert hunk is not None
+        assert hunk.enclosing_context == ""  # graceful fallback, no crash
+
+
 class TestTruncation:
     def test_large_diff_is_truncated(self):
         added = "\n".join(f"+line_{i} = {i}" for i in range(1, 51))

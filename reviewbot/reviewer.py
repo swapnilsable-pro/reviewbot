@@ -76,22 +76,35 @@ Respond with ONLY a JSON array (no prose, no markdown fences). Each element:
 "message": "<what is wrong and why>", "suggestion": "<how to fix it, optional>"}}"""
 
 
-def build_user_prompt(hunk: FileHunk) -> str:
+def build_user_prompt(hunk: FileHunk, intent: str = "") -> str:
     ext = hunk.path.rsplit(".", 1)[-1].lower() if "." in hunk.path else ""
     language = LANGUAGE_HINTS.get(ext, "")
-    lang_line = f"Language: {language}\n" if language else ""
-    new_file_note = "This is a NEW file.\n" if hunk.is_new_file else ""
-    truncated_note = (
-        "Note: the diff was truncated; review only what is shown.\n"
-        if hunk.is_truncated
-        else ""
+    parts = [f"File: {hunk.path}"]
+    if language:
+        parts.append(f"Language: {language}")
+    if hunk.is_new_file:
+        parts.append("This is a NEW file.")
+    if hunk.is_truncated:
+        parts.append("Note: the diff was truncated; review only what is shown.")
+    if intent:
+        parts.append(f"\nChange intent (PR title/description):\n{intent}")
+    if hunk.imports:
+        parts.append(f"\nImports in this file:\n{hunk.imports}")
+    if hunk.enclosing_context:
+        parts.append(
+            "\nEnclosing scope (unchanged context for reference — DO NOT review "
+            "these lines; '>' marks the changed lines):\n" + hunk.enclosing_context
+        )
+    parts.append(
+        "\nDiff (added lines marked +, line numbers refer to the new file):\n\n"
+        + hunk.annotated_diff
     )
-    return (
-        f"File: {hunk.path}\n{lang_line}{new_file_note}{truncated_note}\n"
-        f"Diff (added lines are marked with +, line numbers refer to the new file):\n\n"
-        f"{hunk.annotated_diff}\n\n"
-        "Return the JSON array of findings now."
+    parts.append(
+        "\nOnly report issues on the changed (+) lines. Missing-import / "
+        "undefined-name findings are out of scope unless the import line itself "
+        "is in the diff. Return the JSON array of findings now."
     )
+    return "\n".join(parts)
 
 
 def extract_json_array(text: str) -> list:

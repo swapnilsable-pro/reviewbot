@@ -11,6 +11,7 @@ and reported in the summary.
 
 from __future__ import annotations
 
+import os
 import sys
 
 from reviewbot.config import ReviewBotConfig
@@ -59,7 +60,8 @@ class ReviewRunner:
         _log(f"Reviewing {repo}#{pr_number}: {pr_data.title!r} "
              f"({len(pr_data.files)} changed files)")
 
-        hunks, skipped_files = self._select_hunks(pr_data.files)
+        repo_root = os.environ.get("GITHUB_WORKSPACE") or os.getcwd()
+        hunks, skipped_files = self._select_hunks(pr_data.files, repo_root)
         if not hunks:
             _log("Nothing to review (all files ignored, deleted, or binary). Exiting 0.")
             return 0
@@ -99,7 +101,7 @@ class ReviewRunner:
     # -- internals -----------------------------------------------------------
 
     def _select_hunks(
-        self, files: list
+        self, files: list, repo_root: str
     ) -> tuple[list[FileHunk], list[tuple[str, str]]]:
         """Filter changed files down to reviewable hunks + skip reasons."""
         hunks: list[FileHunk] = []
@@ -123,6 +125,7 @@ class ReviewRunner:
                     changed.patch,
                     max_lines=self.config.review.max_lines_per_file,
                     is_new_file=changed.status == "added",
+                    repo_root=repo_root,
                 )
             except DiffParseError as exc:
                 _log(f"skip {changed.path} (diff parse failed: {exc})")

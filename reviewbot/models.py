@@ -96,6 +96,12 @@ class FileHunk(BaseModel):
     is_new_file: bool = False
     is_truncated: bool = False
     added_line_count: int = 0
+    enclosing_context: str = Field(
+        default="", description="Enclosing function/class + file context, for reference only"
+    )
+    imports: str = Field(default="", description="The file's import/use lines")
+    related_definitions: str = Field(default="")  # populated in Phase 3
+    affected_callers: str = Field(default="")      # populated in Phase 3
 
 
 class FileReview(BaseModel):

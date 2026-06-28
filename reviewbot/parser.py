@@ -18,6 +18,7 @@ from unidiff import PatchSet
 from unidiff.errors import UnidiffParseError
 
 from reviewbot.models import FileHunk
+from reviewbot.source_context import enclosing_context, extract_imports, read_source
 
 
 class DiffParseError(Exception):
@@ -29,6 +30,7 @@ def build_file_hunk(
     patch: str | None,
     max_lines: int = 400,
     is_new_file: bool = False,
+    repo_root: str | None = None,
 ) -> FileHunk | None:
     """Turn a GitHub per-file patch into an annotated FileHunk.
 
@@ -76,6 +78,13 @@ def build_file_hunk(
     if truncated:
         annotated_lines.append("... (diff truncated)")
 
+    enclosing = ""
+    imports = ""
+    source = read_source(repo_root, path)
+    if source is not None:
+        enclosing = enclosing_context(source, commentable, max_lines)
+        imports = extract_imports(source)
+
     return FileHunk(
         path=path,
         annotated_diff="\n".join(annotated_lines),
@@ -83,6 +92,8 @@ def build_file_hunk(
         is_new_file=is_new_file,
         is_truncated=truncated,
         added_line_count=added_count,
+        enclosing_context=enclosing,
+        imports=imports,
     )
 
 

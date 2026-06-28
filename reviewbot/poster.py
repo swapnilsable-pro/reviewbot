@@ -27,11 +27,14 @@ def build_summary(
     result: ReviewResult,
     blocking: list[Finding],
     skipped_files: list[tuple[str, str]] | None = None,
+    off_diff: list[Finding] | None = None,
 ) -> str:
     """Render the PR summary comment (PRD format)."""
-    bugs = result.count(Severity.BUG)
-    warnings = result.count(Severity.WARNING)
-    suggestions = result.count(Severity.SUGGESTION)
+    off_keys = {(f.path, f.line, f.message) for f in (off_diff or [])}
+    on_diff = [f for f in result.findings if (f.path, f.line, f.message) not in off_keys]
+    bugs = sum(1 for f in on_diff if f.severity == Severity.BUG)
+    warnings = sum(1 for f in on_diff if f.severity == Severity.WARNING)
+    suggestions = sum(1 for f in on_diff if f.severity == Severity.SUGGESTION)
     total = bugs + warnings + suggestions
 
     lines = [SUMMARY_MARKER, "## ReviewBot Summary", ""]
@@ -49,11 +52,16 @@ def build_summary(
         (Severity.SUGGESTION, "### 🔵 Suggestions"),
     ]
     for severity, header in sections:
-        items = [f for f in result.findings if f.severity == severity]
+        items = [f for f in on_diff if f.severity == severity]
         if not items:
             continue
         lines += ["", header]
         lines += [f"- {f.path}:{f.line} — {f.message}" for f in items]
+
+    if off_diff:
+        lines += ["", "<details><summary>⚠️ Unverified (line not in the diff)</summary>", ""]
+        lines += [f"- {f.path}:{f.line} — {f.message}" for f in off_diff]
+        lines += ["", "</details>"]
 
     if skipped_files:
         lines += ["", "### ⚪ Skipped files"]

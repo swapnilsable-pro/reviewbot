@@ -70,9 +70,16 @@ class ReviewRunner:
         result, review_skips = self._review_all(hunks)
         skipped_files += review_skips
 
-        blocking = result.blocking_findings(self.config.review.block_merge_on)
-        summary = build_summary(result, blocking, skipped_files or None)
         commentable_map = {h.path: h.commentable_lines for h in hunks}
+        off_diff = [
+            f for f in result.findings
+            if f.line not in commentable_map.get(f.path, set())
+        ]
+        blocking = [
+            f for f in result.blocking_findings(self.config.review.block_merge_on)
+            if f not in off_diff
+        ]
+        summary = build_summary(result, blocking, skipped_files or None, off_diff=off_diff or None)
 
         _log(f"Findings: {len(result.findings)} total, {len(blocking)} blocking")
 

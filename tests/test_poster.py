@@ -170,6 +170,19 @@ class TestCommentPoster:
             )
 
 
+class TestOffDiffQuarantine:
+    def test_off_diff_findings_in_collapsed_section_not_bugs(self):
+        result = make_result([make_finding(line=999, message="suspicious")])
+        summary = build_summary(
+            result, blocking=[],
+            off_diff=[make_finding(line=999, message="suspicious")],
+        )
+        assert "Unverified" in summary
+        assert "999" in summary
+        # not promoted into the authoritative Bugs section
+        assert "### 🔴 Bugs — fix before merge" not in summary
+
+
 class TestFindingCommentBody:
     def test_body_includes_severity_and_fix(self):
         finding = make_finding(suggestion="add a None check")

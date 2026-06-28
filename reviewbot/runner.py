@@ -14,12 +14,14 @@ from __future__ import annotations
 import os
 import sys
 
+from reviewbot.codegraph import build_codegraph
 from reviewbot.config import ReviewBotConfig
 from reviewbot.fetcher import FetchError, PRFetcher, resolve_repo_and_pr
 from reviewbot.models import FileHunk, FileReview, ReviewResult
 from reviewbot.parser import DiffParseError, build_file_hunk
 from reviewbot.poster import CommentPoster, PostError, build_summary
 from reviewbot.reviewer import LLMReviewer
+from reviewbot.source_context import defined_names
 
 
 def _log(message: str) -> None:
@@ -62,7 +64,18 @@ class ReviewRunner:
 
         self._intent = "\n".join(p for p in [pr_data.title, pr_data.body] if p)
         repo_root = os.environ.get("GITHUB_WORKSPACE") or os.getcwd()
+        graph = build_codegraph(repo_root)
         hunks, skipped_files = self._select_hunks(pr_data.files, repo_root)
+        if graph is not None:
+            budget = max(self.config.review.max_lines_per_file // 4, 20)
+            for h in hunks:
+                added = "\n".join(
+                    l for l in h.annotated_diff.splitlines() if " + " in l[:10]
+                )
+                h.related_definitions = graph.related_definitions(h.path, added, budget)
+                names = defined_names(added)
+                if names:
+                    h.affected_callers = graph.affected_callers(h.path, names, budget)
         if not hunks:
             _log("Nothing to review (all files ignored, deleted, or binary). Exiting 0.")
             return 0

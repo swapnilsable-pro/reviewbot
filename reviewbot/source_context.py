@@ -98,6 +98,16 @@ def enclosing_context(source: str, changed_lines: set[int], max_lines: int) -> s
     return "\n".join(out)
 
 
+_DEFINED_RE = re.compile(
+    r"^\s*[+]?\s*(?:export\s+|async\s+)*(?:def|class|function|func|fn)\s+([A-Za-z_]\w*)"
+)
+
+
+def defined_names(added_text: str) -> set[str]:
+    """Names of functions/classes defined in the changed lines."""
+    return {m.group(1) for line in added_text.splitlines() if (m := _DEFINED_RE.match(line))}
+
+
 def extract_imports(source: str, max_lines: int = 40) -> str:
     """Collect the file's import/use lines (bounded)."""
     found = [ln for ln in source.splitlines() if _IMPORT_RE.match(ln)]

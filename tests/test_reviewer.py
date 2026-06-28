@@ -287,6 +287,18 @@ class TestStructuredOutput:
         assert seen["temperature"] == 0
 
 
+class TestContextBlocks:
+    def test_user_prompt_includes_definitions_and_callers(self):
+        hunk = make_hunk(
+            related_definitions="# get_user — defined at app/db.py:1\ndef get_user(...): ...",
+            affected_callers="app/x.py:5: get_user(s, 1)",
+        )
+        p = build_user_prompt(hunk)
+        assert "get_user — defined at app/db.py:1" in p
+        assert "Other call sites" in p
+        assert "app/x.py:5" in p
+
+
 class TestPromptGrounding:
     def test_system_prompt_requires_evidence_and_confidence(self):
         p = build_system_prompt(["bugs"])

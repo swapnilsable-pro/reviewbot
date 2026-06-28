@@ -99,6 +99,17 @@ def build_user_prompt(hunk: FileHunk, intent: str = "") -> str:
         "\nDiff (added lines marked +, line numbers refer to the new file):\n\n"
         + hunk.annotated_diff
     )
+    if hunk.related_definitions:
+        parts.append(
+            "\nDefinitions of functions called by this change (a callee may already "
+            "guard/validate — only assume it does NOT if shown here and proven):\n"
+            + hunk.related_definitions
+        )
+    if hunk.affected_callers:
+        parts.append(
+            "\nOther call sites of functions changed here (check you didn't break them):\n"
+            + hunk.affected_callers
+        )
     parts.append(
         "\nOnly report issues on the changed (+) lines. Missing-import / "
         "undefined-name findings are out of scope unless the import line itself "

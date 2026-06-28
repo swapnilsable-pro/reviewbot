@@ -277,6 +277,16 @@ class TestGroundedValidation:
         assert review.findings == []
 
 
+class TestStructuredOutput:
+    def test_review_call_sends_temperature_zero(self):
+        seen = {}
+        def handler(request):
+            seen.update(json.loads(request.content))
+            return httpx.Response(200, json=llm_response(VALID_FINDINGS))
+        make_reviewer(handler).review_file(make_hunk())
+        assert seen["temperature"] == 0
+
+
 class TestPromptGrounding:
     def test_system_prompt_requires_evidence_and_confidence(self):
         p = build_system_prompt(["bugs"])

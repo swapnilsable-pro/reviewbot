@@ -260,9 +260,11 @@ class LLMReviewer:
         payload = {
             "model": self.model,
             "messages": messages,
-            "temperature": 0.1,
+            "temperature": 0,
             "max_tokens": max_tokens,
         }
+        if max_tokens > 100:  # review calls, not ping
+            payload["response_format"] = {"type": "json_object"}
 
         last_error = "unknown"
         for attempt in range(self.max_http_retries):

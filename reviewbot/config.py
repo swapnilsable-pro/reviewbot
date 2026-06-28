@@ -14,6 +14,18 @@ from pydantic import BaseModel, Field, ValidationError
 
 DEFAULT_MODEL = "google/gemma-4-31b-it:free"
 DEFAULT_CONFIG_FILENAME = "reviewbot.yml"
+HOUSE_RULES_PATH = ".github/reviewbot.md"
+
+
+def load_house_rules(repo_root: str | None, max_chars: int = 4000) -> str:
+    """Optional project review conventions; empty string when absent (zero-setup)."""
+    if not repo_root:
+        return ""
+    path = Path(repo_root) / HOUSE_RULES_PATH
+    try:
+        return path.read_text(encoding="utf-8")[:max_chars] if path.exists() else ""
+    except OSError:
+        return ""
 
 
 class ConfigError(Exception):

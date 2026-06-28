@@ -9,6 +9,7 @@ from reviewbot.config import (
     ReviewBotConfig,
     ReviewSettings,
     load_config,
+    load_house_rules,
 )
 
 
@@ -119,3 +120,16 @@ class TestIgnoreGlobs:
         assert config.is_ignored("vendor/lib/x.go")
         assert config.is_ignored("api/types.gen.go")
         assert not config.is_ignored("api/types.go")
+
+
+class TestHouseRules:
+    def test_reads_house_rules_when_present(self, tmp_path):
+        (tmp_path / ".github").mkdir()
+        (tmp_path / ".github" / "reviewbot.md").write_text("Always use tabs.\n")
+        assert "Always use tabs." in load_house_rules(str(tmp_path))
+
+    def test_absent_returns_empty(self, tmp_path):
+        assert load_house_rules(str(tmp_path)) == ""
+
+    def test_none_root_returns_empty(self):
+        assert load_house_rules(None) == ""

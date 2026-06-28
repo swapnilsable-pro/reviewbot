@@ -15,7 +15,7 @@ import os
 import sys
 
 from reviewbot.codegraph import build_codegraph
-from reviewbot.config import ReviewBotConfig
+from reviewbot.config import ReviewBotConfig, load_house_rules
 from reviewbot.fetcher import FetchError, PRFetcher, resolve_repo_and_pr
 from reviewbot.models import FileHunk, FileReview, ReviewResult
 from reviewbot.parser import DiffParseError, build_file_hunk
@@ -64,6 +64,7 @@ class ReviewRunner:
 
         self._intent = "\n".join(p for p in [pr_data.title, pr_data.body] if p)
         repo_root = os.environ.get("GITHUB_WORKSPACE") or os.getcwd()
+        self._house_rules = load_house_rules(repo_root)
         graph = build_codegraph(repo_root)
         hunks, skipped_files = self._select_hunks(pr_data.files, repo_root)
         if graph is not None:
@@ -172,6 +173,7 @@ class ReviewRunner:
             min_confidence=self.config.review.min_confidence,
             require_evidence=self.config.review.require_evidence,
             verify=self.config.review.verify,
+            house_rules=self._house_rules,
         )
         file_reviews: list[FileReview] = []
         skipped: list[tuple[str, str]] = []

@@ -30,6 +30,9 @@ class TestReadSource:
     def test_path_traversal_refused(self, tmp_path):
         assert read_source(str(tmp_path), "../../etc/passwd") is None
 
+    def test_absolute_path_refused(self, tmp_path):
+        assert read_source(str(tmp_path), "/etc/passwd") is None
+
 
 class TestEnclosingContext:
     def test_small_file_returns_whole_file_numbered(self):
@@ -51,7 +54,7 @@ class TestEnclosingContext:
         src = "\n".join(f"x{i} = {i}" for i in range(100))
         ctx = enclosing_context(src, {50}, max_lines=10)
         assert "x50 = 50" in ctx
-        assert len(ctx.splitlines()) <= 12
+        assert len(ctx.splitlines()) == 10
 
 
 class TestExtractImports:

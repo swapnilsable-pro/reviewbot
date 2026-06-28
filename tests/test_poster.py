@@ -203,6 +203,19 @@ class TestSuggestionsAndCommit:
         comment = pull._requester.requestJsonAndCheck.call_args.kwargs["input"]["comments"][0]
         assert comment["start_line"] == 13
         assert comment["line"] == 15
+        assert comment["start_side"] == "RIGHT"
+
+    def test_start_line_not_commentable_falls_back_to_single_line(self):
+        pull = make_pull()
+        f = make_finding(line=15, start_line=13)
+        CommentPoster(pull).post_review(
+            summary="s", findings=[f],
+            commentable_map={"app/auth.py": {15}},  # 13 not commentable
+            blocking=False,
+        )
+        comment = pull._requester.requestJsonAndCheck.call_args.kwargs["input"]["comments"][0]
+        assert "start_line" not in comment
+        assert comment["line"] == 15
 
 
 class TestFindingCommentBody:

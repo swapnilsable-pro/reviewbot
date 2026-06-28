@@ -47,33 +47,33 @@ class LLMError(Exception):
     """Raised when the LLM cannot produce a usable response."""
 
 
-def build_system_prompt(categories: list[str]) -> str:
+def build_system_prompt(categories: list[str], house_rules: str = "") -> str:
     enabled = [c for c in categories if c in CATEGORY_DESCRIPTIONS] or ["bugs"]
-    category_lines = "\n".join(
-        f"- {name}: {CATEGORY_DESCRIPTIONS[name]}" for name in enabled
-    )
-    return f"""You are ReviewBot, an expert code reviewer. You review pull request diffs \
-and report specific, actionable findings.
+    category_lines = "\n".join(f"- {n}: {CATEGORY_DESCRIPTIONS[n]}" for n in enabled)
+    rules_block = f"\nProject-specific rules:\n{house_rules}\n" if house_rules else ""
+    return f"""You are ReviewBot, an expert code reviewer. Report specific, provable findings on the changed (+) lines of a diff.
 
 Report findings ONLY in these categories:
 {category_lines}
 
-Severity levels:
+Severity:
 - "bug": will or very likely will cause incorrect behavior, a crash, or a vulnerability
 - "warning": a risky pattern that should be fixed but may not break immediately
-- "suggestion": an improvement that is optional
-
+- "suggestion": an optional improvement
+{rules_block}
 Rules:
-1. Only report issues on ADDED lines — the ones prefixed with a line number and "+".
-2. Use the line number shown at the start of the line.
-3. Be specific: name the variable/function and say what goes wrong. No vague advice.
-4. Do NOT report issues you cannot see evidence for in the diff.
-5. If the code is fine, return an empty array. Do not invent findings.
-6. At most {MAX_FINDINGS_PER_FILE} findings.
+1. The diff is a PARTIAL view. Do NOT flag missing null-checks, validation, or error handling unless the shown code uses the value unguarded AND no guard is visible in the enclosing scope. Assume a called function may already validate/guard unless its definition is shown and proves otherwise.
+2. Every finding MUST quote, in "evidence", the exact added line it refers to. If you cannot quote a concrete added line that proves the issue, DO NOT report it.
+3. Set "confidence" in [0,1]: how sure you are this is a real defect a reviewer would act on.
+4. Be specific: name the variable/function and the exact failing input/state.
+5. If the code is fine, return [].  At most {MAX_FINDINGS_PER_FILE} findings.
 
-Respond with ONLY a JSON array (no prose, no markdown fences). Each element:
-{{"line": <int>, "severity": "bug"|"warning"|"suggestion", "category": "<category>", \
-"message": "<what is wrong and why>", "suggestion": "<how to fix it, optional>"}}"""
+Respond with ONLY a JSON array (no prose, no fences). Each element:
+{{"line": <int>, "severity": "bug"|"warning"|"suggestion", "category": "<category>", "message": "<what is wrong and the input that triggers it>", "evidence": "<verbatim quote of the added line>", "confidence": <0..1>, "suggestion": "<how to fix, optional>"}}
+
+Examples:
+GOOD: {{"line": 42, "severity": "bug", "category": "bugs", "message": "total is used before assignment when items is empty", "evidence": "return total / len(items)", "confidence": 0.9}}
+REJECTED (do not produce): a finding like "consider adding validation" with no quotable line — there is nothing to anchor it to."""
 
 
 def build_user_prompt(hunk: FileHunk, intent: str = "") -> str:
@@ -143,12 +143,23 @@ class LLMReviewer:
         api_key: str,
         model: str,
         categories: list[str] | None = None,
+        *,
+        intent: str = "",
+        house_rules: str = "",
+        min_confidence: float = 0.0,
+        require_evidence: bool = False,
+        verify: bool = False,
         timeout: float = 90.0,
         max_json_retries: int = 2,
         max_http_retries: int = 3,
     ) -> None:
         self.model = model
         self.categories = categories or list(CATEGORY_DESCRIPTIONS)
+        self.intent = intent
+        self.house_rules = house_rules
+        self.min_confidence = min_confidence
+        self.require_evidence = require_evidence
+        self.verify = verify
         self.max_json_retries = max_json_retries
         self.max_http_retries = max_http_retries
         self._client = httpx.Client(
@@ -172,8 +183,8 @@ class LLMReviewer:
     def review_file(self, hunk: FileHunk) -> FileReview:
         """Review one file. Never raises — failures produce a skipped FileReview."""
         messages = [
-            {"role": "system", "content": build_system_prompt(self.categories)},
-            {"role": "user", "content": build_user_prompt(hunk)},
+            {"role": "system", "content": build_system_prompt(self.categories, self.house_rules)},
+            {"role": "user", "content": build_user_prompt(hunk, self.intent)},
         ]
 
         last_error = "unknown error"

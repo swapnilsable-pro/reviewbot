@@ -236,3 +236,25 @@ class TestPing:
             return httpx.Response(200, json=llm_response("OK"))
 
         assert make_reviewer(handler).ping() == "OK"
+
+
+class TestPromptGrounding:
+    def test_system_prompt_requires_evidence_and_confidence(self):
+        from reviewbot.reviewer import build_system_prompt
+        p = build_system_prompt(["bugs"])
+        assert "evidence" in p
+        assert "confidence" in p
+        assert "partial" in p.lower()  # the "diff is a partial view" rule
+
+    def test_user_prompt_includes_intent(self):
+        from reviewbot.reviewer import build_user_prompt
+        hunk = make_hunk()
+        p = build_user_prompt(hunk, intent="Fix login crash")
+        assert "Fix login crash" in p
+
+    def test_finding_accepts_evidence_and_confidence(self):
+        from reviewbot.models import Finding
+        f = Finding(line=1, severity="bug", category="bugs", message="x",
+                    evidence="user.email", confidence=0.9)
+        assert f.evidence == "user.email"
+        assert f.confidence == 0.9

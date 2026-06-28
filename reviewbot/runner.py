@@ -60,6 +60,7 @@ class ReviewRunner:
         _log(f"Reviewing {repo}#{pr_number}: {pr_data.title!r} "
              f"({len(pr_data.files)} changed files)")
 
+        self._intent = "\n".join(p for p in [pr_data.title, pr_data.body] if p)
         repo_root = os.environ.get("GITHUB_WORKSPACE") or os.getcwd()
         hunks, skipped_files = self._select_hunks(pr_data.files, repo_root)
         if not hunks:
@@ -144,6 +145,7 @@ class ReviewRunner:
             api_key=self._openrouter_api_key,
             model=self.config.model,
             categories=self.config.review.categories,
+            intent=self._intent,
         )
         file_reviews: list[FileReview] = []
         skipped: list[tuple[str, str]] = []

@@ -43,6 +43,8 @@ class Finding(BaseModel):
     category: str = Field(min_length=1)
     message: str = Field(min_length=1)
     suggestion: str | None = None
+    evidence: str = Field(default="", description="Verbatim quote of the added line proving the issue")
+    confidence: float = Field(default=1.0, ge=0.0, le=1.0)
     # Filled in by the runner; not part of the LLM response schema.
     path: str = ""
 

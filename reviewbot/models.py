@@ -45,6 +45,7 @@ class Finding(BaseModel):
     suggestion: str | None = None
     evidence: str = Field(default="", description="Verbatim quote of the added line proving the issue")
     confidence: float = Field(default=1.0, ge=0.0, le=1.0)
+    start_line: int | None = Field(default=None, description="First line of a multi-line range")
     # Filled in by the runner; not part of the LLM response schema.
     path: str = ""
 

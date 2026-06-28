@@ -108,6 +108,7 @@ class ReviewRunner:
                     findings=result.findings,
                     commentable_map=commentable_map,
                     blocking=bool(blocking),
+                    commit_id=pr_data.head_sha,
                 )
                 _log(f"Posted review ({event}) with "
                      f"{len(result.findings)} findings.")

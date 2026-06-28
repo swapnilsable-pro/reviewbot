@@ -183,6 +183,28 @@ class TestOffDiffQuarantine:
         assert "### 🔴 Bugs — fix before merge" not in summary
 
 
+class TestSuggestionsAndCommit:
+    def test_commit_id_passed_into_review(self):
+        pull = make_pull()
+        CommentPoster(pull).post_review(
+            summary="s", findings=[make_finding(line=13)],
+            commentable_map={"app/auth.py": {13}}, blocking=False, commit_id="abc123",
+        )
+        payload = pull._requester.requestJsonAndCheck.call_args.kwargs["input"]
+        assert payload["commit_id"] == "abc123"
+
+    def test_multiline_finding_emits_start_line(self):
+        pull = make_pull()
+        f = make_finding(line=15, start_line=13)
+        CommentPoster(pull).post_review(
+            summary="s", findings=[f],
+            commentable_map={"app/auth.py": {13, 14, 15}}, blocking=False,
+        )
+        comment = pull._requester.requestJsonAndCheck.call_args.kwargs["input"]["comments"][0]
+        assert comment["start_line"] == 13
+        assert comment["line"] == 15
+
+
 class TestFindingCommentBody:
     def test_body_includes_severity_and_fix(self):
         finding = make_finding(suggestion="add a None check")

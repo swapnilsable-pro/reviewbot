@@ -294,10 +294,16 @@ class LLMReviewer:
             ])
             survivors = extract_json_array(content)
         except LLMError:
-            return findings  # ponytail: best-effort; never lose findings to verify failure
-        kept = self._validate_findings(survivors, hunk)
+            return findings  # verification is best-effort; never lose findings to its failure
+        # ponytail: the verifier's output is untrusted schema — don't re-validate it.
+        # Keep the ORIGINAL validated Finding objects whose line the verifier confirmed.
+        confirmed_lines = {
+            item["line"]
+            for item in survivors
+            if isinstance(item, dict) and isinstance(item.get("line"), int)
+        }
         original_lines = {f.line for f in findings}
-        return [f for f in kept if f.line in original_lines] or []
+        return [f for f in findings if f.line in (confirmed_lines & original_lines)]
 
     def _chat(self, messages: list[dict], max_tokens: int = 4000) -> str:
         """POST to OpenRouter with backoff on 429/5xx/transport errors."""

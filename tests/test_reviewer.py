@@ -316,3 +316,34 @@ class TestPromptGrounding:
                     evidence="user.email", confidence=0.9)
         assert f.evidence == "user.email"
         assert f.confidence == 0.9
+
+
+class TestVerifyPass:
+    def test_verify_drops_unconfirmed_finding(self):
+        # 1st call: two candidates. 2nd (verify) call: keep only line 13.
+        responses = [
+            json.dumps([
+                {"line": 13, "severity": "bug", "category": "bugs", "message": "real",
+                 "evidence": "email = user.email", "confidence": 0.9},
+                {"line": 14, "severity": "bug", "category": "bugs", "message": "bogus",
+                 "evidence": "email = user.email", "confidence": 0.9},
+            ]),
+            json.dumps([
+                {"line": 13, "severity": "bug", "category": "bugs", "message": "real",
+                 "evidence": "email = user.email", "confidence": 0.95},
+            ]),
+        ]
+        def handler(request):
+            return httpx.Response(200, json=llm_response(responses.pop(0)))
+        review = make_reviewer(handler, verify=True).review_file(
+            make_hunk(annotated_diff="    13 +     email = user.email", commentable_lines={13, 14})
+        )
+        assert [f.line for f in review.findings] == [13]
+
+    def test_no_findings_skips_verify_call(self):
+        calls = []
+        def handler(request):
+            calls.append(1)
+            return httpx.Response(200, json=llm_response("[]"))
+        make_reviewer(handler, verify=True).review_file(make_hunk())
+        assert len(calls) == 1  # no verify call when nothing to verify

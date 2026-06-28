@@ -45,6 +45,7 @@ def review(
         "--dry-run",
         help="Run the review but print findings instead of posting to GitHub.",
     ),
+    no_verify: bool = typer.Option(False, "--no-verify", help="Skip the second verification pass (faster, cheaper on the free tier)."),
 ) -> None:
     """Review a pull request and post inline comments."""
     github_token = _require_env(
@@ -61,6 +62,9 @@ def review(
     except ConfigError as exc:
         typer.secho(f"Error: {exc}", fg=typer.colors.RED, err=True)
         raise typer.Exit(code=2)
+
+    if no_verify:
+        config.review.verify = False
 
     from reviewbot.runner import ReviewRunner
 

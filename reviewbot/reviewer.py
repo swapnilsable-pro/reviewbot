@@ -146,6 +146,24 @@ def extract_json_array(text: str) -> list:
     return parsed
 
 
+def build_verify_prompt(findings: list[Finding], hunk: FileHunk) -> str:
+    listed = "\n".join(
+        f'{i}. line {f.line} [{f.severity.value}] {f.message} (evidence: "{f.evidence}")'
+        for i, f in enumerate(findings, 1)
+    )
+    return (
+        "You previously proposed these findings on the change below. For EACH, decide "
+        "if it is a TRUE positive: name the input/state that triggers it and confirm no "
+        "visible guard or shown callee prevents it. Return ONLY a JSON array of the "
+        "findings that survive, each with the SAME line/severity/category/message/evidence "
+        "and a confidence in [0,1]. Drop any you cannot ground.\n\n"
+        f"Candidates:\n{listed}\n\n"
+        f"Enclosing scope:\n{hunk.enclosing_context or '(not available)'}\n\n"
+        f"Callee definitions:\n{hunk.related_definitions or '(none)'}\n\n"
+        f"Diff:\n{hunk.annotated_diff}\n\nReturn the JSON array now."
+    )
+
+
 class LLMReviewer:
     """Reviews one FileHunk at a time against the OpenRouter API."""
 
@@ -224,6 +242,8 @@ class LLMReviewer:
                 continue
 
             findings = self._validate_findings(raw_findings, hunk)
+            if self.verify and findings:
+                findings = self._verify(findings, hunk)
             return FileReview(path=hunk.path, findings=findings)
 
         return FileReview(
@@ -265,6 +285,19 @@ class LLMReviewer:
         order = {Severity.BUG: 0, Severity.WARNING: 1, Severity.SUGGESTION: 2}
         findings.sort(key=lambda f: (order[f.severity], f.line))
         return findings[:MAX_FINDINGS_PER_FILE]
+
+    def _verify(self, findings: list[Finding], hunk: FileHunk) -> list[Finding]:
+        try:
+            content = self._chat([
+                {"role": "system", "content": "You are a strict verifier. Default to dropping unprovable findings."},
+                {"role": "user", "content": build_verify_prompt(findings, hunk)},
+            ])
+            survivors = extract_json_array(content)
+        except LLMError:
+            return findings  # ponytail: best-effort; never lose findings to verify failure
+        kept = self._validate_findings(survivors, hunk)
+        original_lines = {f.line for f in findings}
+        return [f for f in kept if f.line in original_lines] or []
 
     def _chat(self, messages: list[dict], max_tokens: int = 4000) -> str:
         """POST to OpenRouter with backoff on 429/5xx/transport errors."""

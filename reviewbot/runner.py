@@ -92,7 +92,9 @@ class ReviewRunner:
             f for f in result.blocking_findings(self.config.review.block_merge_on)
             if f not in off_diff
         ]
-        summary = build_summary(result, blocking, skipped_files or None, off_diff=off_diff or None)
+        partial = [h.path for h in hunks if h.is_truncated]
+        summary = build_summary(result, blocking, skipped_files or None,
+                                off_diff=off_diff or None, partial=partial or None)
 
         _log(f"Findings: {len(result.findings)} total, {len(blocking)} blocking")
 

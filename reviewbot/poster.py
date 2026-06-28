@@ -28,6 +28,7 @@ def build_summary(
     blocking: list[Finding],
     skipped_files: list[tuple[str, str]] | None = None,
     off_diff: list[Finding] | None = None,
+    partial: list[str] | None = None,
 ) -> str:
     """Render the PR summary comment (PRD format)."""
     off_keys = {(f.path, f.line, f.message) for f in (off_diff or [])}
@@ -62,6 +63,10 @@ def build_summary(
         lines += ["", "<details><summary>⚠️ Unverified (line not in the diff)</summary>", ""]
         lines += [f"- {f.path}:{f.line} — {f.message}" for f in off_diff]
         lines += ["", "</details>"]
+
+    if partial:
+        lines += ["", "### ⚠️ Partially reviewed (large files — tail not analyzed)"]
+        lines += [f"- {p}" for p in partial]
 
     if skipped_files:
         lines += ["", "### ⚪ Skipped files"]

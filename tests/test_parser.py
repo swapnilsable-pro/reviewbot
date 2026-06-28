@@ -132,3 +132,19 @@ class TestTruncation:
     def test_small_diff_not_truncated(self, sample_files):
         hunk = build_file_hunk("app/auth.py", sample_files["app/auth.py"])
         assert not hunk.is_truncated
+
+
+class TestTruncationAddedLines:
+    def test_exact_fit_not_marked_truncated(self):
+        # 5 added lines + 1 header = 6 annotated lines; max_lines=6 is an exact
+        # fit — nothing is omitted, so is_truncated must be False.
+        added = "\n".join(f"+x{i} = {i}" for i in range(5))
+        hunk = build_file_hunk("ok.py", f"@@ -0,0 +1,5 @@\n{added}\n", max_lines=6)
+        assert not hunk.is_truncated
+        assert "diff truncated" not in hunk.annotated_diff
+
+    def test_genuinely_large_diff_still_truncates(self):
+        added = "\n".join(f"+x{i} = {i}" for i in range(200))
+        hunk = build_file_hunk("big.py", f"@@ -0,0 +1,200 @@\n{added}\n", max_lines=20)
+        assert hunk.is_truncated
+        assert hunk.annotated_diff.splitlines()[-1] == "... (diff truncated)"

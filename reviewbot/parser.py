@@ -48,10 +48,8 @@ def build_file_hunk(
     truncated = False
 
     for hunk in patched_file:
-        header = (
-            f"@@ -{hunk.source_start},{hunk.source_length} "
-            f"+{hunk.target_start},{hunk.target_length} @@"
-        )
+        header = (f"@@ -{hunk.source_start},{hunk.source_length} "
+                  f"+{hunk.target_start},{hunk.target_length} @@")
         annotated_lines.append(header)
         for line in hunk:
             content = line.value.rstrip("\n")
@@ -64,18 +62,17 @@ def build_file_hunk(
                 commentable.add(line.target_line_no)
             elif line.is_removed:
                 annotated_lines.append(f"       - {content}")
-
-        if len(annotated_lines) >= max_lines:
-            truncated = True
+            if len(annotated_lines) > max_lines:  # ponytail: single overflow source of truth
+                truncated = True
+                break
+        if truncated:
             break
 
     if added_count == 0:
         return None  # pure deletion / rename without edits — nothing to review
 
-    if len(annotated_lines) > max_lines:
-        annotated_lines = annotated_lines[:max_lines]
-        truncated = True
     if truncated:
+        annotated_lines = annotated_lines[:max_lines]
         annotated_lines.append("... (diff truncated)")
 
     enclosing = ""

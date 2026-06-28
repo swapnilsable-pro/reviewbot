@@ -126,7 +126,16 @@ class ReviewResult(BaseModel):
 
     @property
     def findings(self) -> list[Finding]:
-        return [f for fr in self.file_reviews for f in fr.findings]
+        seen: set[tuple[str, str]] = set()
+        out: list[Finding] = []
+        for fr in self.file_reviews:
+            for f in fr.findings:
+                key = (f.message.strip().lower(), f.category)
+                if key in seen:
+                    continue
+                seen.add(key)
+                out.append(f)
+        return out
 
     def count(self, severity: Severity) -> int:
         return sum(1 for f in self.findings if f.severity == severity)

@@ -218,6 +218,23 @@ class TestSuggestionsAndCommit:
         assert comment["line"] == 15
 
 
+class TestDedup:
+    def test_duplicate_findings_collapsed(self):
+        from reviewbot.models import FileReview, Finding, ReviewResult
+        dup = lambda p: Finding(path=p, line=1, severity="warning", category="code_quality",
+                                message="Duplicated logic across files")
+        result = ReviewResult(
+            file_reviews=[
+                FileReview(path="a.py", findings=[dup("a.py")]),
+                FileReview(path="b.py", findings=[dup("b.py")]),
+            ],
+            files_reviewed=2,
+        )
+        # same (message, category) on different files → kept once
+        msgs = [(f.message, f.category) for f in result.findings]
+        assert msgs.count(("Duplicated logic across files", "code_quality")) == 1
+
+
 class TestFindingCommentBody:
     def test_body_includes_severity_and_fix(self):
         finding = make_finding(suggestion="add a None check")

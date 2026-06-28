@@ -227,7 +227,13 @@ class LLMReviewer:
 
     # -- internals -----------------------------------------------------------
 
+    @staticmethod
+    def _norm(s: str) -> str:
+        return re.sub(r"\s+", "", s).lower()
+
     def _validate_findings(self, raw: list, hunk: FileHunk) -> list[Finding]:
+        enabled = {c for c in self.categories}
+        diff_norm = self._norm(hunk.annotated_diff)
         findings: list[Finding] = []
         for item in raw:
             if not isinstance(item, dict):
@@ -235,10 +241,16 @@ class LLMReviewer:
             try:
                 finding = Finding.model_validate({**item, "path": hunk.path})
             except ValidationError:
-                continue  # drop individual bad findings, keep the rest
+                continue
+            if finding.confidence < self.min_confidence:
+                continue
+            if enabled and finding.category not in enabled:
+                continue
+            if self.require_evidence:
+                if not finding.evidence or self._norm(finding.evidence) not in diff_norm:
+                    continue
             findings.append(finding)
 
-        # Most severe first, capped to keep PRs readable.
         order = {Severity.BUG: 0, Severity.WARNING: 1, Severity.SUGGESTION: 2}
         findings.sort(key=lambda f: (order[f.severity], f.line))
         return findings[:MAX_FINDINGS_PER_FILE]

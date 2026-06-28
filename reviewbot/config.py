@@ -30,6 +30,9 @@ class ReviewSettings(BaseModel):
     )
     max_files_per_pr: int = Field(default=20, gt=0)
     max_lines_per_file: int = Field(default=400, gt=0)
+    min_confidence: float = Field(default=0.7, ge=0.0, le=1.0)
+    require_evidence: bool = True
+    verify: bool = True  # used in Phase 4
 
 
 class ReviewBotConfig(BaseModel):

@@ -146,6 +146,8 @@ class ReviewRunner:
             model=self.config.model,
             categories=self.config.review.categories,
             intent=self._intent,
+            min_confidence=self.config.review.min_confidence,
+            require_evidence=self.config.review.require_evidence,
         )
         file_reviews: list[FileReview] = []
         skipped: list[tuple[str, str]] = []

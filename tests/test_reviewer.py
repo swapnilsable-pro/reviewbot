@@ -240,6 +240,43 @@ class TestPing:
         assert make_reviewer(handler).ping() == "OK"
 
 
+class TestGroundedValidation:
+    def _review(self, items, **kw):
+        def handler(request):
+            return httpx.Response(200, json=llm_response(json.dumps(items)))
+        return make_reviewer(handler, require_evidence=True, min_confidence=0.5, **kw).review_file(
+            make_hunk(annotated_diff="    13 +     email = user.email", commentable_lines={13})
+        )
+
+    def test_finding_without_evidence_in_diff_dropped(self):
+        review = self._review([
+            {"line": 13, "severity": "bug", "category": "bugs",
+             "message": "x", "evidence": "this text is not in the diff", "confidence": 0.9},
+        ])
+        assert review.findings == []
+
+    def test_finding_with_quoted_evidence_kept(self):
+        review = self._review([
+            {"line": 13, "severity": "bug", "category": "bugs",
+             "message": "x", "evidence": "email = user.email", "confidence": 0.9},
+        ])
+        assert len(review.findings) == 1
+
+    def test_low_confidence_dropped(self):
+        review = self._review([
+            {"line": 13, "severity": "bug", "category": "bugs",
+             "message": "x", "evidence": "email = user.email", "confidence": 0.2},
+        ])
+        assert review.findings == []
+
+    def test_disabled_category_dropped(self):
+        review = self._review([
+            {"line": 13, "severity": "suggestion", "category": "style",
+             "message": "x", "evidence": "email = user.email", "confidence": 0.9},
+        ], categories=["bugs"])
+        assert review.findings == []
+
+
 class TestPromptGrounding:
     def test_system_prompt_requires_evidence_and_confidence(self):
         p = build_system_prompt(["bugs"])

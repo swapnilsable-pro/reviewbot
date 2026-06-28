@@ -60,8 +60,8 @@ Severity:
 - "bug": will or very likely will cause incorrect behavior, a crash, or a vulnerability
 - "warning": a risky pattern that should be fixed but may not break immediately
 - "suggestion": an optional improvement
-{rules_block}
-Rules:
+
+{rules_block}Rules:
 1. The diff is a PARTIAL view. Do NOT flag missing null-checks, validation, or error handling unless the shown code uses the value unguarded AND no guard is visible in the enclosing scope. Assume a called function may already validate/guard unless its definition is shown and proves otherwise.
 2. Every finding MUST quote, in "evidence", the exact added line it refers to. If you cannot quote a concrete added line that proves the issue, DO NOT report it.
 3. Set "confidence" in [0,1]: how sure you are this is a real defect a reviewer would act on.

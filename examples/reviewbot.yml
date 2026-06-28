@@ -20,3 +20,7 @@ review:
 
   max_files_per_pr: 20       # skip review of extra files on huge PRs
   max_lines_per_file: 400    # truncate very large diffs
+
+  verify: true           # second LLM pass drops ungrounded findings (default: true; use --no-verify to skip)
+  min_confidence: 0.7    # drop findings below this score; raise to reduce noise, lower to catch more (default: 0.7)
+  require_evidence: true # drop findings whose quoted line is not in the diff (default: true)

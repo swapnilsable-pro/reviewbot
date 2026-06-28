@@ -306,6 +306,10 @@ class TestPromptGrounding:
         assert "confidence" in p
         assert "partial" in p.lower()  # the "diff is a partial view" rule
 
+    def test_system_prompt_documents_start_line(self):
+        p = build_system_prompt(["bugs"])
+        assert "start_line" in p
+
     def test_user_prompt_includes_intent(self):
         hunk = make_hunk()
         p = build_user_prompt(hunk, intent="Fix login crash")

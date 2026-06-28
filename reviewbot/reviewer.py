@@ -69,7 +69,9 @@ Severity:
 5. If the code is fine, return [].  At most {MAX_FINDINGS_PER_FILE} findings.
 
 Respond with ONLY a JSON array (no prose, no fences). Each element:
-{{"line": <int>, "severity": "bug"|"warning"|"suggestion", "category": "<category>", "message": "<what is wrong and the input that triggers it>", "evidence": "<verbatim quote of the added line>", "confidence": <0..1>, "suggestion": "<how to fix, optional>"}}
+{{"line": <int>, "start_line": <int, optional>, "severity": "bug"|"warning"|"suggestion", "category": "<category>", "message": "<what is wrong and the input that triggers it>", "evidence": "<verbatim quote of the added line>", "confidence": <0..1>, "suggestion": "<how to fix, optional>"}}
+
+6. A finding may set "start_line" ONLY for an issue that genuinely spans multiple lines; "start_line" must be less than "line" and both must be added (+) or context lines shown in the diff. Single-line findings omit "start_line".
 
 Examples:
 GOOD: {{"line": 42, "severity": "bug", "category": "bugs", "message": "total is used before assignment when items is empty", "evidence": "return total / len(items)", "confidence": 0.9}}

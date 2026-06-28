@@ -84,9 +84,13 @@ class CodeGraph:
             defs = self._defs.get(name)
             if not defs:
                 continue
-            # Prefer same file, then same top-level dir, then a unique global match.
-            same_file = [d for d in defs if d[0] == changed_path]
-            same_dir = [d for d in defs if d[0].split(os.sep)[0] == changed_path.split(os.sep)[0]]
+            # Prefer same file → globally unique → uniquely same-dir → drop on ambiguity.
+            # Normalize paths to forward slashes for robust cross-platform comparison.
+            def _np(p):
+                return p.replace("\\", "/")
+            cp = _np(changed_path)
+            same_file = [d for d in defs if _np(d[0]) == cp]
+            same_dir = [d for d in defs if _np(d[0]).split("/")[0] == cp.split("/")[0]]
             if same_file:
                 chosen = same_file[0]
             elif len(defs) == 1:
@@ -118,6 +122,7 @@ class CodeGraph:
             for i, line in enumerate(self._file_lines(rel), 1):
                 if pat.search(line):
                     hits.append(f"{rel}:{i}: {line.strip()}")
+                    # budget_lines bounds the number of HIT LINES (each hit is one line)
                     if len(hits) >= budget_lines:
                         return "\n".join(hits)
         return "\n".join(hits)

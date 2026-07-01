@@ -170,6 +170,71 @@ class TestCommentPoster:
             )
 
 
+class TestOffDiffQuarantine:
+    def test_off_diff_findings_in_collapsed_section_not_bugs(self):
+        result = make_result([make_finding(line=999, message="suspicious")])
+        summary = build_summary(
+            result, blocking=[],
+            off_diff=[make_finding(line=999, message="suspicious")],
+        )
+        assert "Unverified" in summary
+        assert "999" in summary
+        # not promoted into the authoritative Bugs section
+        assert "### 🔴 Bugs — fix before merge" not in summary
+
+
+class TestSuggestionsAndCommit:
+    def test_commit_id_passed_into_review(self):
+        pull = make_pull()
+        CommentPoster(pull).post_review(
+            summary="s", findings=[make_finding(line=13)],
+            commentable_map={"app/auth.py": {13}}, blocking=False, commit_id="abc123",
+        )
+        payload = pull._requester.requestJsonAndCheck.call_args.kwargs["input"]
+        assert payload["commit_id"] == "abc123"
+
+    def test_multiline_finding_emits_start_line(self):
+        pull = make_pull()
+        f = make_finding(line=15, start_line=13)
+        CommentPoster(pull).post_review(
+            summary="s", findings=[f],
+            commentable_map={"app/auth.py": {13, 14, 15}}, blocking=False,
+        )
+        comment = pull._requester.requestJsonAndCheck.call_args.kwargs["input"]["comments"][0]
+        assert comment["start_line"] == 13
+        assert comment["line"] == 15
+        assert comment["start_side"] == "RIGHT"
+
+    def test_start_line_not_commentable_falls_back_to_single_line(self):
+        pull = make_pull()
+        f = make_finding(line=15, start_line=13)
+        CommentPoster(pull).post_review(
+            summary="s", findings=[f],
+            commentable_map={"app/auth.py": {15}},  # 13 not commentable
+            blocking=False,
+        )
+        comment = pull._requester.requestJsonAndCheck.call_args.kwargs["input"]["comments"][0]
+        assert "start_line" not in comment
+        assert comment["line"] == 15
+
+
+class TestDedup:
+    def test_duplicate_findings_collapsed(self):
+        from reviewbot.models import FileReview, Finding, ReviewResult
+        dup = lambda p: Finding(path=p, line=1, severity="warning", category="code_quality",
+                                message="Duplicated logic across files")
+        result = ReviewResult(
+            file_reviews=[
+                FileReview(path="a.py", findings=[dup("a.py")]),
+                FileReview(path="b.py", findings=[dup("b.py")]),
+            ],
+            files_reviewed=2,
+        )
+        # same (message, category) on different files → kept once
+        msgs = [(f.message, f.category) for f in result.findings]
+        assert msgs.count(("Duplicated logic across files", "code_quality")) == 1
+
+
 class TestFindingCommentBody:
     def test_body_includes_severity_and_fix(self):
         finding = make_finding(suggestion="add a None check")

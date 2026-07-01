@@ -11,14 +11,17 @@ and reported in the summary.
 
 from __future__ import annotations
 
+import os
 import sys
 
-from reviewbot.config import ReviewBotConfig
+from reviewbot.codegraph import build_codegraph
+from reviewbot.config import ReviewBotConfig, load_house_rules
 from reviewbot.fetcher import FetchError, PRFetcher, resolve_repo_and_pr
 from reviewbot.models import FileHunk, FileReview, ReviewResult
 from reviewbot.parser import DiffParseError, build_file_hunk
 from reviewbot.poster import CommentPoster, PostError, build_summary
 from reviewbot.reviewer import LLMReviewer
+from reviewbot.source_context import defined_names
 
 
 def _log(message: str) -> None:
@@ -59,7 +62,21 @@ class ReviewRunner:
         _log(f"Reviewing {repo}#{pr_number}: {pr_data.title!r} "
              f"({len(pr_data.files)} changed files)")
 
-        hunks, skipped_files = self._select_hunks(pr_data.files)
+        self._intent = "\n".join(p for p in [pr_data.title, pr_data.body] if p)
+        repo_root = os.environ.get("GITHUB_WORKSPACE") or os.getcwd()
+        self._house_rules = load_house_rules(repo_root)
+        graph = build_codegraph(repo_root)
+        hunks, skipped_files = self._select_hunks(pr_data.files, repo_root)
+        if graph is not None:
+            budget = max(self.config.review.max_lines_per_file // 4, 20)
+            for h in hunks:
+                added = "\n".join(
+                    l for l in h.annotated_diff.splitlines() if " + " in l[:10]
+                )
+                h.related_definitions = graph.related_definitions(h.path, added, budget)
+                names = defined_names(added)
+                if names:
+                    h.affected_callers = graph.affected_callers(h.path, names, budget)
         if not hunks:
             _log("Nothing to review (all files ignored, deleted, or binary). Exiting 0.")
             return 0
@@ -67,9 +84,18 @@ class ReviewRunner:
         result, review_skips = self._review_all(hunks)
         skipped_files += review_skips
 
-        blocking = result.blocking_findings(self.config.review.block_merge_on)
-        summary = build_summary(result, blocking, skipped_files or None)
         commentable_map = {h.path: h.commentable_lines for h in hunks}
+        off_diff = [
+            f for f in result.findings
+            if f.line not in commentable_map.get(f.path, set())
+        ]
+        blocking = [
+            f for f in result.blocking_findings(self.config.review.block_merge_on)
+            if f not in off_diff
+        ]
+        partial = [h.path for h in hunks if h.is_truncated]
+        summary = build_summary(result, blocking, skipped_files or None,
+                                off_diff=off_diff or None, partial=partial or None)
 
         _log(f"Findings: {len(result.findings)} total, {len(blocking)} blocking")
 
@@ -85,6 +111,7 @@ class ReviewRunner:
                     findings=result.findings,
                     commentable_map=commentable_map,
                     blocking=bool(blocking),
+                    commit_id=pr_data.head_sha,
                 )
                 _log(f"Posted review ({event}) with "
                      f"{len(result.findings)} findings.")
@@ -99,7 +126,7 @@ class ReviewRunner:
     # -- internals -----------------------------------------------------------
 
     def _select_hunks(
-        self, files: list
+        self, files: list, repo_root: str
     ) -> tuple[list[FileHunk], list[tuple[str, str]]]:
         """Filter changed files down to reviewable hunks + skip reasons."""
         hunks: list[FileHunk] = []
@@ -123,6 +150,7 @@ class ReviewRunner:
                     changed.patch,
                     max_lines=self.config.review.max_lines_per_file,
                     is_new_file=changed.status == "added",
+                    repo_root=repo_root,
                 )
             except DiffParseError as exc:
                 _log(f"skip {changed.path} (diff parse failed: {exc})")
@@ -141,6 +169,11 @@ class ReviewRunner:
             api_key=self._openrouter_api_key,
             model=self.config.model,
             categories=self.config.review.categories,
+            intent=self._intent,
+            min_confidence=self.config.review.min_confidence,
+            require_evidence=self.config.review.require_evidence,
+            verify=self.config.review.verify,
+            house_rules=self._house_rules,
         )
         file_reviews: list[FileReview] = []
         skipped: list[tuple[str, str]] = []

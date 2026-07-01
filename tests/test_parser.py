@@ -101,6 +101,24 @@ class TestGitHubStylePatch:
             build_file_hunk("x.py", "this is not a diff at all\njust text\n")
 
 
+class TestEnclosingContext:
+    def test_repo_root_populates_enclosing_scope(self, tmp_path):
+        (tmp_path / "app").mkdir()
+        (tmp_path / "app" / "auth.py").write_text(
+            "import os\n\ndef login(user):\n    return user.email\n"
+        )
+        patch = "@@ -3,1 +3,2 @@\n def login(user):\n+    log(user)\n     return user.email\n"
+        hunk = build_file_hunk("app/auth.py", patch, repo_root=str(tmp_path))
+        assert "def login(user):" in hunk.enclosing_context
+        assert "import os" in hunk.imports
+
+    def test_missing_file_falls_back_to_empty_context(self):
+        patch = "@@ -1,1 +1,2 @@\n a = 1\n+b = 2\n"
+        hunk = build_file_hunk("ghost.py", patch, repo_root="/nonexistent")
+        assert hunk is not None
+        assert hunk.enclosing_context == ""  # graceful fallback, no crash
+
+
 class TestTruncation:
     def test_large_diff_is_truncated(self):
         added = "\n".join(f"+line_{i} = {i}" for i in range(1, 51))
@@ -114,3 +132,19 @@ class TestTruncation:
     def test_small_diff_not_truncated(self, sample_files):
         hunk = build_file_hunk("app/auth.py", sample_files["app/auth.py"])
         assert not hunk.is_truncated
+
+
+class TestTruncationAddedLines:
+    def test_exact_fit_not_marked_truncated(self):
+        # 5 added lines + 1 header = 6 annotated lines; max_lines=6 is an exact
+        # fit — nothing is omitted, so is_truncated must be False.
+        added = "\n".join(f"+x{i} = {i}" for i in range(5))
+        hunk = build_file_hunk("ok.py", f"@@ -0,0 +1,5 @@\n{added}\n", max_lines=6)
+        assert not hunk.is_truncated
+        assert "diff truncated" not in hunk.annotated_diff
+
+    def test_genuinely_large_diff_still_truncates(self):
+        added = "\n".join(f"+x{i} = {i}" for i in range(200))
+        hunk = build_file_hunk("big.py", f"@@ -0,0 +1,200 @@\n{added}\n", max_lines=20)
+        assert hunk.is_truncated
+        assert hunk.annotated_diff.splitlines()[-1] == "... (diff truncated)"

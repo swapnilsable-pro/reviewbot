@@ -47,51 +47,77 @@ class LLMError(Exception):
     """Raised when the LLM cannot produce a usable response."""
 
 
-def build_system_prompt(categories: list[str]) -> str:
+def build_system_prompt(categories: list[str], house_rules: str = "") -> str:
     enabled = [c for c in categories if c in CATEGORY_DESCRIPTIONS] or ["bugs"]
-    category_lines = "\n".join(
-        f"- {name}: {CATEGORY_DESCRIPTIONS[name]}" for name in enabled
-    )
-    return f"""You are ReviewBot, an expert code reviewer. You review pull request diffs \
-and report specific, actionable findings.
+    category_lines = "\n".join(f"- {n}: {CATEGORY_DESCRIPTIONS[n]}" for n in enabled)
+    rules_block = f"\nProject-specific rules:\n{house_rules}\n" if house_rules else ""
+    return f"""You are ReviewBot, an expert code reviewer. Report specific, provable findings on the changed (+) lines of a diff.
 
 Report findings ONLY in these categories:
 {category_lines}
 
-Severity levels:
+Severity:
 - "bug": will or very likely will cause incorrect behavior, a crash, or a vulnerability
 - "warning": a risky pattern that should be fixed but may not break immediately
-- "suggestion": an improvement that is optional
+- "suggestion": an optional improvement
 
-Rules:
-1. Only report issues on ADDED lines — the ones prefixed with a line number and "+".
-2. Use the line number shown at the start of the line.
-3. Be specific: name the variable/function and say what goes wrong. No vague advice.
-4. Do NOT report issues you cannot see evidence for in the diff.
-5. If the code is fine, return an empty array. Do not invent findings.
-6. At most {MAX_FINDINGS_PER_FILE} findings.
+{rules_block}Rules:
+1. The diff is a PARTIAL view. Do NOT flag missing null-checks, validation, or error handling unless the shown code uses the value unguarded AND no guard is visible in the enclosing scope. Assume a called function may already validate/guard unless its definition is shown and proves otherwise.
+2. Every finding MUST quote, in "evidence", the exact added line it refers to. If you cannot quote a concrete added line that proves the issue, DO NOT report it.
+3. Set "confidence" in [0,1]: how sure you are this is a real defect a reviewer would act on.
+4. Be specific: name the variable/function and the exact failing input/state.
+5. If the code is fine, return [].  At most {MAX_FINDINGS_PER_FILE} findings.
 
-Respond with ONLY a JSON array (no prose, no markdown fences). Each element:
-{{"line": <int>, "severity": "bug"|"warning"|"suggestion", "category": "<category>", \
-"message": "<what is wrong and why>", "suggestion": "<how to fix it, optional>"}}"""
+Respond with ONLY a JSON array (no prose, no fences). Each element:
+{{"line": <int>, "start_line": <int, optional>, "severity": "bug"|"warning"|"suggestion", "category": "<category>", "message": "<what is wrong and the input that triggers it>", "evidence": "<verbatim quote of the added line>", "confidence": <0..1>, "suggestion": "<how to fix, optional>"}}
+
+6. A finding may set "start_line" ONLY for an issue that genuinely spans multiple lines; "start_line" must be less than "line" and both must be added (+) or context lines shown in the diff. Single-line findings omit "start_line".
+
+Examples:
+GOOD: {{"line": 42, "severity": "bug", "category": "bugs", "message": "total is used before assignment when items is empty", "evidence": "return total / len(items)", "confidence": 0.9}}
+REJECTED (do not produce): a finding like "consider adding validation" with no quotable line — there is nothing to anchor it to."""
 
 
-def build_user_prompt(hunk: FileHunk) -> str:
+def build_user_prompt(hunk: FileHunk, intent: str = "") -> str:
     ext = hunk.path.rsplit(".", 1)[-1].lower() if "." in hunk.path else ""
     language = LANGUAGE_HINTS.get(ext, "")
-    lang_line = f"Language: {language}\n" if language else ""
-    new_file_note = "This is a NEW file.\n" if hunk.is_new_file else ""
-    truncated_note = (
-        "Note: the diff was truncated; review only what is shown.\n"
-        if hunk.is_truncated
-        else ""
+    parts = [f"File: {hunk.path}"]
+    if language:
+        parts.append(f"Language: {language}")
+    if hunk.is_new_file:
+        parts.append("This is a NEW file.")
+    if hunk.is_truncated:
+        parts.append("Note: the diff was truncated; review only what is shown.")
+    if intent:
+        parts.append(f"\nChange intent (PR title/description):\n{intent}")
+    if hunk.imports:
+        parts.append(f"\nImports in this file:\n{hunk.imports}")
+    if hunk.enclosing_context:
+        parts.append(
+            "\nEnclosing scope (unchanged context for reference — DO NOT review "
+            "these lines; '>' marks the changed lines):\n" + hunk.enclosing_context
+        )
+    parts.append(
+        "\nDiff (added lines marked +, line numbers refer to the new file):\n\n"
+        + hunk.annotated_diff
     )
-    return (
-        f"File: {hunk.path}\n{lang_line}{new_file_note}{truncated_note}\n"
-        f"Diff (added lines are marked with +, line numbers refer to the new file):\n\n"
-        f"{hunk.annotated_diff}\n\n"
-        "Return the JSON array of findings now."
+    if hunk.related_definitions:
+        parts.append(
+            "\nDefinitions of functions called by this change (a callee may already "
+            "guard/validate — only assume it does NOT if shown here and proven):\n"
+            + hunk.related_definitions
+        )
+    if hunk.affected_callers:
+        parts.append(
+            "\nOther call sites of functions changed here (check you didn't break them):\n"
+            + hunk.affected_callers
+        )
+    parts.append(
+        "\nOnly report issues on the changed (+) lines. Missing-import / "
+        "undefined-name findings are out of scope unless the import line itself "
+        "is in the diff. Return the JSON array of findings now."
     )
+    return "\n".join(parts)
 
 
 def extract_json_array(text: str) -> list:
@@ -122,6 +148,24 @@ def extract_json_array(text: str) -> list:
     return parsed
 
 
+def build_verify_prompt(findings: list[Finding], hunk: FileHunk) -> str:
+    listed = "\n".join(
+        f'{i}. line {f.line} [{f.severity.value}] {f.message} (evidence: "{f.evidence}")'
+        for i, f in enumerate(findings, 1)
+    )
+    return (
+        "You previously proposed these findings on the change below. For EACH, decide "
+        "if it is a TRUE positive: name the input/state that triggers it and confirm no "
+        "visible guard or shown callee prevents it. Return ONLY a JSON array of the "
+        "findings that survive, each with the SAME line/severity/category/message/evidence "
+        "and a confidence in [0,1]. Drop any you cannot ground.\n\n"
+        f"Candidates:\n{listed}\n\n"
+        f"Enclosing scope:\n{hunk.enclosing_context or '(not available)'}\n\n"
+        f"Callee definitions:\n{hunk.related_definitions or '(none)'}\n\n"
+        f"Diff:\n{hunk.annotated_diff}\n\nReturn the JSON array now."
+    )
+
+
 class LLMReviewer:
     """Reviews one FileHunk at a time against the OpenRouter API."""
 
@@ -130,12 +174,23 @@ class LLMReviewer:
         api_key: str,
         model: str,
         categories: list[str] | None = None,
+        *,
+        intent: str = "",
+        house_rules: str = "",
+        min_confidence: float = 0.0,
+        require_evidence: bool = False,
+        verify: bool = False,
         timeout: float = 90.0,
         max_json_retries: int = 2,
         max_http_retries: int = 3,
     ) -> None:
         self.model = model
         self.categories = categories or list(CATEGORY_DESCRIPTIONS)
+        self.intent = intent
+        self.house_rules = house_rules
+        self.min_confidence = min_confidence
+        self.require_evidence = require_evidence
+        self.verify = verify
         self.max_json_retries = max_json_retries
         self.max_http_retries = max_http_retries
         self._client = httpx.Client(
@@ -159,8 +214,8 @@ class LLMReviewer:
     def review_file(self, hunk: FileHunk) -> FileReview:
         """Review one file. Never raises — failures produce a skipped FileReview."""
         messages = [
-            {"role": "system", "content": build_system_prompt(self.categories)},
-            {"role": "user", "content": build_user_prompt(hunk)},
+            {"role": "system", "content": build_system_prompt(self.categories, self.house_rules)},
+            {"role": "user", "content": build_user_prompt(hunk, self.intent)},
         ]
 
         last_error = "unknown error"
@@ -189,6 +244,8 @@ class LLMReviewer:
                 continue
 
             findings = self._validate_findings(raw_findings, hunk)
+            if self.verify and findings:
+                findings = self._verify(findings, hunk)
             return FileReview(path=hunk.path, findings=findings)
 
         return FileReview(
@@ -203,7 +260,13 @@ class LLMReviewer:
 
     # -- internals -----------------------------------------------------------
 
+    @staticmethod
+    def _norm(s: str) -> str:
+        return re.sub(r"\s+", "", s).lower()
+
     def _validate_findings(self, raw: list, hunk: FileHunk) -> list[Finding]:
+        enabled = {c for c in self.categories}
+        diff_norm = self._norm(hunk.annotated_diff)
         findings: list[Finding] = []
         for item in raw:
             if not isinstance(item, dict):
@@ -211,22 +274,49 @@ class LLMReviewer:
             try:
                 finding = Finding.model_validate({**item, "path": hunk.path})
             except ValidationError:
-                continue  # drop individual bad findings, keep the rest
+                continue
+            if finding.confidence < self.min_confidence:
+                continue
+            if enabled and finding.category not in enabled:
+                continue
+            if self.require_evidence:
+                if not finding.evidence or self._norm(finding.evidence) not in diff_norm:
+                    continue
             findings.append(finding)
 
-        # Most severe first, capped to keep PRs readable.
         order = {Severity.BUG: 0, Severity.WARNING: 1, Severity.SUGGESTION: 2}
         findings.sort(key=lambda f: (order[f.severity], f.line))
         return findings[:MAX_FINDINGS_PER_FILE]
+
+    def _verify(self, findings: list[Finding], hunk: FileHunk) -> list[Finding]:
+        try:
+            content = self._chat([
+                {"role": "system", "content": "You are a strict verifier. Default to dropping unprovable findings."},
+                {"role": "user", "content": build_verify_prompt(findings, hunk)},
+            ])
+            survivors = extract_json_array(content)
+        except LLMError:
+            return findings  # verification is best-effort; never lose findings to its failure
+        # ponytail: the verifier's output is untrusted schema — don't re-validate it.
+        # Keep the ORIGINAL validated Finding objects whose line the verifier confirmed.
+        confirmed_lines = {
+            item["line"]
+            for item in survivors
+            if isinstance(item, dict) and isinstance(item.get("line"), int)
+        }
+        original_lines = {f.line for f in findings}
+        return [f for f in findings if f.line in (confirmed_lines & original_lines)]
 
     def _chat(self, messages: list[dict], max_tokens: int = 4000) -> str:
         """POST to OpenRouter with backoff on 429/5xx/transport errors."""
         payload = {
             "model": self.model,
             "messages": messages,
-            "temperature": 0.1,
+            "temperature": 0,
             "max_tokens": max_tokens,
         }
+        if max_tokens > 100:  # review calls, not ping
+            payload["response_format"] = {"type": "json_object"}
 
         last_error = "unknown"
         for attempt in range(self.max_http_retries):

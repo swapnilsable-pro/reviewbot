@@ -6,10 +6,12 @@ import json
 import httpx
 import pytest
 
-from reviewbot.models import FileHunk, Severity
+from reviewbot.models import FileHunk, Finding, Severity
 from reviewbot.reviewer import (
     LLMError,
     LLMReviewer,
+    build_system_prompt,
+    build_user_prompt,
     extract_json_array,
 )
 
@@ -236,3 +238,116 @@ class TestPing:
             return httpx.Response(200, json=llm_response("OK"))
 
         assert make_reviewer(handler).ping() == "OK"
+
+
+class TestGroundedValidation:
+    def _review(self, items, **kw):
+        def handler(request):
+            return httpx.Response(200, json=llm_response(json.dumps(items)))
+        return make_reviewer(handler, require_evidence=True, min_confidence=0.5, **kw).review_file(
+            make_hunk(annotated_diff="    13 +     email = user.email", commentable_lines={13})
+        )
+
+    def test_finding_without_evidence_in_diff_dropped(self):
+        review = self._review([
+            {"line": 13, "severity": "bug", "category": "bugs",
+             "message": "x", "evidence": "this text is not in the diff", "confidence": 0.9},
+        ])
+        assert review.findings == []
+
+    def test_finding_with_quoted_evidence_kept(self):
+        review = self._review([
+            {"line": 13, "severity": "bug", "category": "bugs",
+             "message": "x", "evidence": "email = user.email", "confidence": 0.9},
+        ])
+        assert len(review.findings) == 1
+
+    def test_low_confidence_dropped(self):
+        review = self._review([
+            {"line": 13, "severity": "bug", "category": "bugs",
+             "message": "x", "evidence": "email = user.email", "confidence": 0.2},
+        ])
+        assert review.findings == []
+
+    def test_disabled_category_dropped(self):
+        review = self._review([
+            {"line": 13, "severity": "suggestion", "category": "style",
+             "message": "x", "evidence": "email = user.email", "confidence": 0.9},
+        ], categories=["bugs"])
+        assert review.findings == []
+
+
+class TestStructuredOutput:
+    def test_review_call_sends_temperature_zero(self):
+        seen = {}
+        def handler(request):
+            seen.update(json.loads(request.content))
+            return httpx.Response(200, json=llm_response(VALID_FINDINGS))
+        make_reviewer(handler).review_file(make_hunk())
+        assert seen["temperature"] == 0
+
+
+class TestContextBlocks:
+    def test_user_prompt_includes_definitions_and_callers(self):
+        hunk = make_hunk(
+            related_definitions="# get_user — defined at app/db.py:1\ndef get_user(...): ...",
+            affected_callers="app/x.py:5: get_user(s, 1)",
+        )
+        p = build_user_prompt(hunk)
+        assert "get_user — defined at app/db.py:1" in p
+        assert "Other call sites" in p
+        assert "app/x.py:5" in p
+
+
+class TestPromptGrounding:
+    def test_system_prompt_requires_evidence_and_confidence(self):
+        p = build_system_prompt(["bugs"])
+        assert "evidence" in p
+        assert "confidence" in p
+        assert "partial" in p.lower()  # the "diff is a partial view" rule
+
+    def test_system_prompt_documents_start_line(self):
+        p = build_system_prompt(["bugs"])
+        assert "start_line" in p
+
+    def test_user_prompt_includes_intent(self):
+        hunk = make_hunk()
+        p = build_user_prompt(hunk, intent="Fix login crash")
+        assert "Fix login crash" in p
+
+    def test_finding_accepts_evidence_and_confidence(self):
+        f = Finding(line=1, severity="bug", category="bugs", message="x",
+                    evidence="user.email", confidence=0.9)
+        assert f.evidence == "user.email"
+        assert f.confidence == 0.9
+
+
+class TestVerifyPass:
+    def test_verify_drops_unconfirmed_finding(self):
+        # 1st call: two candidates. 2nd (verify) call: keep only line 13.
+        responses = [
+            json.dumps([
+                {"line": 13, "severity": "bug", "category": "bugs", "message": "real",
+                 "evidence": "email = user.email", "confidence": 0.9},
+                {"line": 14, "severity": "bug", "category": "bugs", "message": "bogus",
+                 "evidence": "email = user.email", "confidence": 0.9},
+            ]),
+            json.dumps([
+                {"line": 13, "severity": "bug", "category": "bugs", "message": "real",
+                 "evidence": "email = user.email", "confidence": 0.95},
+            ]),
+        ]
+        def handler(request):
+            return httpx.Response(200, json=llm_response(responses.pop(0)))
+        review = make_reviewer(handler, verify=True).review_file(
+            make_hunk(annotated_diff="    13 +     email = user.email", commentable_lines={13, 14})
+        )
+        assert [f.line for f in review.findings] == [13]
+
+    def test_no_findings_skips_verify_call(self):
+        calls = []
+        def handler(request):
+            calls.append(1)
+            return httpx.Response(200, json=llm_response("[]"))
+        make_reviewer(handler, verify=True).review_file(make_hunk())
+        assert len(calls) == 1  # no verify call when nothing to verify

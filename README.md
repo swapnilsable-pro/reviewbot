@@ -104,9 +104,17 @@ review:
 
   max_files_per_pr: 20
   max_lines_per_file: 400
+
+  verify: true           # second LLM pass that drops ungrounded findings (default: true)
+  min_confidence: 0.7    # drop findings below this confidence score (default: 0.7)
+  require_evidence: true # drop findings whose quoted line isn't in the diff (default: true)
 ```
 
 `block_merge_on` matches **severities** (`bug`, `warning`, `suggestion`) and **categories** (`security`, …). PRs that only touch ignored files (docs, tests) are never blocked — ReviewBot exits 0 without calling the LLM.
+
+ReviewBot now requires each finding to quote a proving line from the diff and clear a confidence threshold, so low-signal comments that older versions posted are suppressed. Tune the bar with `min_confidence` and `require_evidence`.
+
+Add a `.github/reviewbot.md` file to your repo to inject project-specific review rules (style guides, security invariants, domain constraints) directly into the LLM prompt.
 
 ## How it works
 
@@ -143,6 +151,7 @@ export GITHUB_TOKEN=ghp_...          # needs pull-requests: write
 reviewbot test-connection            # verify the key + model work
 reviewbot review --repo owner/name --pr 123 --dry-run   # print findings, post nothing
 reviewbot review --repo owner/name --pr 123             # post the review
+reviewbot review --repo owner/name --pr 123 --no-verify # skip the second verification pass
 ```
 
 Exit codes: `0` clean / non-blocking, `1` blocking findings (fails CI), `2` usage or config error.

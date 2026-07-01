@@ -43,6 +43,9 @@ class Finding(BaseModel):
     category: str = Field(min_length=1)
     message: str = Field(min_length=1)
     suggestion: str | None = None
+    evidence: str = Field(default="", description="Verbatim quote of the added line proving the issue")
+    confidence: float = Field(default=1.0, ge=0.0, le=1.0)
+    start_line: int | None = Field(default=None, description="First line of a multi-line range")
     # Filled in by the runner; not part of the LLM response schema.
     path: str = ""
 
@@ -96,6 +99,12 @@ class FileHunk(BaseModel):
     is_new_file: bool = False
     is_truncated: bool = False
     added_line_count: int = 0
+    enclosing_context: str = Field(
+        default="", description="Enclosing function/class + file context, for reference only"
+    )
+    imports: str = Field(default="", description="The file's import/use lines")
+    related_definitions: str = Field(default="")  # populated in Phase 3
+    affected_callers: str = Field(default="")      # populated in Phase 3
 
 
 class FileReview(BaseModel):
@@ -117,7 +126,16 @@ class ReviewResult(BaseModel):
 
     @property
     def findings(self) -> list[Finding]:
-        return [f for fr in self.file_reviews for f in fr.findings]
+        seen: set[tuple[str, str]] = set()
+        out: list[Finding] = []
+        for fr in self.file_reviews:
+            for f in fr.findings:
+                key = (f.message.strip().lower(), f.category)
+                if key in seen:
+                    continue
+                seen.add(key)
+                out.append(f)
+        return out
 
     def count(self, severity: Severity) -> int:
         return sum(1 for f in self.findings if f.severity == severity)

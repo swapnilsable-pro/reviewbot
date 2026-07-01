@@ -32,6 +32,7 @@ class PRData(BaseModel):
     repo_full_name: str
     number: int
     title: str = ""
+    body: str = ""
     head_sha: str = ""
     files: list[ChangedFile] = Field(default_factory=list)
 
@@ -117,6 +118,7 @@ class PRFetcher:
             repo_full_name=pull.base.repo.full_name,
             number=pull.number,
             title=pull.title or "",
+            body=(pull.body or "")[:2000],  # ponytail: cap intent to keep tokens bounded
             head_sha=pull.head.sha,
             files=files,
         )

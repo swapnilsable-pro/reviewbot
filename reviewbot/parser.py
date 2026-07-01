@@ -18,6 +18,7 @@ from unidiff import PatchSet
 from unidiff.errors import UnidiffParseError
 
 from reviewbot.models import FileHunk
+from reviewbot.source_context import enclosing_context, extract_imports, read_source
 
 
 class DiffParseError(Exception):
@@ -29,6 +30,7 @@ def build_file_hunk(
     patch: str | None,
     max_lines: int = 400,
     is_new_file: bool = False,
+    repo_root: str | None = None,
 ) -> FileHunk | None:
     """Turn a GitHub per-file patch into an annotated FileHunk.
 
@@ -46,10 +48,8 @@ def build_file_hunk(
     truncated = False
 
     for hunk in patched_file:
-        header = (
-            f"@@ -{hunk.source_start},{hunk.source_length} "
-            f"+{hunk.target_start},{hunk.target_length} @@"
-        )
+        header = (f"@@ -{hunk.source_start},{hunk.source_length} "
+                  f"+{hunk.target_start},{hunk.target_length} @@")
         annotated_lines.append(header)
         for line in hunk:
             content = line.value.rstrip("\n")
@@ -62,19 +62,25 @@ def build_file_hunk(
                 commentable.add(line.target_line_no)
             elif line.is_removed:
                 annotated_lines.append(f"       - {content}")
-
-        if len(annotated_lines) >= max_lines:
-            truncated = True
+            if len(annotated_lines) > max_lines:  # ponytail: single overflow source of truth
+                truncated = True
+                break
+        if truncated:
             break
 
     if added_count == 0:
         return None  # pure deletion / rename without edits — nothing to review
 
-    if len(annotated_lines) > max_lines:
-        annotated_lines = annotated_lines[:max_lines]
-        truncated = True
     if truncated:
+        annotated_lines = annotated_lines[:max_lines]
         annotated_lines.append("... (diff truncated)")
+
+    enclosing = ""
+    imports = ""
+    source = read_source(repo_root, path)
+    if source is not None:
+        enclosing = enclosing_context(source, commentable, max_lines)
+        imports = extract_imports(source)
 
     return FileHunk(
         path=path,
@@ -83,6 +89,8 @@ def build_file_hunk(
         is_new_file=is_new_file,
         is_truncated=truncated,
         added_line_count=added_count,
+        enclosing_context=enclosing,
+        imports=imports,
     )
 
 
